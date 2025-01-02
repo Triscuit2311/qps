@@ -7,7 +7,7 @@ test "vector_search" {
     _ = &data;
     var patt = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF, 0xBA, 0xAD, 0xCA, 0xFE };
     _ = &patt;
-    var mask = [_]u8{ 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00 };
+    var mask = [_]u8{ 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff };
     _ = &mask;
 
     var t = try std.time.Timer.start();
@@ -56,7 +56,18 @@ test "vector_search" {
         }
         t2 = t.lap();
 
-        // Defer SIMD until first byte match & last byte match (since neither can be wildcards!)
+        // Defer SIMD until first byte match & last byte match
+        // Get final non-wild byte position
+        const last_non_wc_i: usize = v: {
+            var i = sz - 1;
+            while (sz >= 0) : (i -= 1) {
+                if (mask[i] != 0xFF) {
+                    break :v i;
+                }
+            }
+            break :v i;
+        };
+
         for (0..data.len - sz) |i| {
 
             // Don't bother loading SIMD unless we find a byte
@@ -65,7 +76,7 @@ test "vector_search" {
             if (data[i] != patt[0]) {
                 continue;
             }
-            if (data[i + sz - 1] != patt[sz - 1]) {
+            if (data[i + last_non_wc_i] != patt[last_non_wc_i]) {
                 continue;
             }
             const slc: []const u8 = &data;

@@ -291,7 +291,7 @@ test "parse_success" {
         p.init(input, std.io.null_writer) catch {
             try std.testing.expect(false);
         };
-        try std.testing.expect(checkArrAgainstPatternResult(check[0..8], p.bytes[0..p.len]));
+        try std.testing.expect(checkArrAgainstPatternResult(check[0..8], p.bytes[0..p.size]));
     }
 
     const mix_input = "0x00 01, 02; 03: 0xFF%FE\r\nfd\\xfc";
@@ -303,6 +303,6 @@ test "parse_success" {
         p.init(mix_input, std.io.null_writer) catch {
             try std.testing.expect(false);
         };
-        try std.testing.expect(checkArrAgainstPatternResult(check[0..8], p.bytes[0..p.len]));
+        try std.testing.expect(checkArrAgainstPatternResult(check[0..8], p.bytes[0..p.size]));
     }
 }

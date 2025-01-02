@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "zb",
+        .name = "qps",
         .root_module = module,
         .optimize = optimize,
     });
