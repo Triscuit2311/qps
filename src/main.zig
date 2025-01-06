@@ -1,40 +1,24 @@
 const std = @import("std");
 const pattern = @import("pattern.zig");
 const search = @import("search.zig");
-const td = @import("tests/test_data.zig");
 
 pub fn main() anyerror!void {
-    const cout = std.io.getStdOut().writer();
+    var args = std.process.args();
+    var i: u8 = 0;
+    while (args.next()) |a| {
+        std.debug.print("[{d}] \"{s}\"\n", .{ i, a });
+        i += 1;
+    }
+    std.debug.print("\n\n", .{});
 
-    const input = "0x74,0x69,0x2e,0x20,0x4e,0x75,0x6c,0x6c,0x61,0x20,0x76,0x65,0x6c,0x69,0x74,0x20,0x6f,0x72,0x63,0x69,0x2c,0x20,0x6c,0x61,0x63,0x69,0x6e,0x69,0x61,0x20,0x69,0x6e,0x20,0x61,0x6e,0x74,0x65,0x20,0x69,0x64,0x2c,0x20,0x63,0x6f,0x6e,0x76";
+    // const of = std.fs.File.OpenFlags{ .mode = std.fs.File.OpenMode.read_only, .lock = std.fs.File.Lock.shared };
 
-    var p: pattern.Pattern64 = .{};
-
-    try p.init(input, cout);
-    try p.printCombined(cout);
-
-    std.debug.print("\n", .{});
-
-    const s: search.MakeSearchRunner(64) = .{};
-
-    var data = [_]u8{0x0} ** 10000;
-
-    td.GetData(10000, &data);
-
-    var t = try std.time.Timer.start();
-    const offset: usize = s.search(&data, data.len, p) catch |err| {
-        switch (err) {
-            search.SearchResult.NotFound => {
-                std.debug.print("Needle Not Found\n", .{});
-            },
-            search.SearchResult.BadOperation => {
-                std.debug.print("Bad Operation\n", .{});
-            },
-        }
+    const file = std.fs.cwd().openFile("build.zig", .{ .mode = std.fs.File.OpenMode.read_only }) catch |err| {
+        std.log.err("Failed to open file: {s}", .{@errorName(err)});
         return;
     };
-    const n: u64 = t.read();
-    _ = offset;
+    defer file.close();
 
-    std.debug.print("Found in: {d}ns\n", .{n});
+    //   file.readToEndAlloc(allocator: Allocator, max_bytes: usize)
+
 }
