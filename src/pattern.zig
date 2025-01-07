@@ -144,6 +144,7 @@ pub fn MakePatternType(sz: usize) type {
                 }
             };
 
+            // if no delims, add space delimiting
             if (!has_delims) {
                 const clean_nd = allocator.alloc(u8, input.len * 2) catch {
                     return PatternError.ParseError;
@@ -165,7 +166,7 @@ pub fn MakePatternType(sz: usize) type {
                     clean_nd[c_i + 2] = ' ';
                 }
 
-                // fill with spaces
+                // pad with spaces
                 while (c_i < clean_nd.len) : (c_i += 1) {
                     clean_nd[c_i] = ' ';
                 }
@@ -206,6 +207,7 @@ pub fn MakePatternType(sz: usize) type {
                 len += 1;
             }
 
+            // backfill wildcards
             while (len < self.size) {
                 self.bytes[len], self.mask[len] = .{ 0x00, 0xFF };
                 len += 1;
