@@ -2,14 +2,29 @@ const std = @import("std");
 
 // Useful types
 pub const Pattern8 = MakePatternType(8);
+pub const Pattern16 = MakePatternType(16);
 pub const Pattern32 = MakePatternType(32);
 pub const Pattern64 = MakePatternType(64);
 pub const Pattern128 = MakePatternType(128);
 pub const Pattern256 = MakePatternType(256);
 
-const ParseByteError = error{
+pub const ParseByteError = error{
     WildCard,
     BadSlice,
+};
+
+pub const PatternError = error{
+    TooManyTokens,
+    ParseError,
+};
+
+pub const SearchResult = error{
+    NotFound,
+    BadOperation,
+};
+
+pub const FileSearchError = error{
+    NotFound,
 };
 
 fn parseByte(val: []const u8) ParseByteError!u8 {
@@ -28,11 +43,6 @@ fn parseByte(val: []const u8) ParseByteError!u8 {
         }
     };
 }
-
-const PatternError = error{
-    TooManyTokens,
-    ParseError,
-};
 
 pub fn MakePatternType(sz: usize) type {
     return struct {
@@ -235,76 +245,121 @@ pub fn MakePatternType(sz: usize) type {
     };
 }
 
-//Tests
+pub fn MakeSearchRunner(pattern_size: usize) type {
+    return struct {
+        pattern_size: usize = pattern_size,
+        pub fn search(self: *const @This(), haystack: []u8, scan_len: usize, needle: MakePatternType(pattern_size)) SearchResult!?usize {
+            if (self.pattern_size != needle.size) {
+                return SearchResult.BadOperation;
+            }
+            if (scan_len - pattern_size > haystack.len) {
+                return SearchResult.BadOperation;
+            }
 
-// Only for test usage
-fn checkArrAgainstPatternResult(check: []const u8, pattern: []const u8) bool {
-    if (check.len != pattern.len) {
-        return false;
-    }
-    return std.mem.eql(u8, check, pattern);
-}
+            const mask_v: @Vector(pattern_size, u8) = needle.mask[0..pattern_size].*;
+            const find: @Vector(pattern_size, u8) = needle.bytes[0..pattern_size].*;
 
-test "parse_errors" {
-    std.testing.log_level = .info;
+            for (0..scan_len - pattern_size) |i| {
 
-    var p: MakePatternType(8) = .{};
+                // Don't bother with SIMD unless we find an initial byte
+                // However now we will double-check each instance of the starting byte.
+                // Slower on data where the pattern initial byte is very prevelent (~15+-% of all bytes).
+                if (haystack[i] != needle.bytes[0]) {
+                    continue;
+                }
 
-    const input_toolong = "0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD, 0xFC, 0x99"; // One too many
-
-    try std.testing.expectError(PatternError.TooManyTokens, p.init(input_toolong, std.io.null_writer));
-
-    const input_badtoken0 = "0x00, 0x01, 0x02, 0x03, 0xFFFFFF, 0xFE, 0xFD, 0xFC"; // too large
-    // We do not want an overflow
-    try std.testing.expectError(PatternError.ParseError, p.init(input_badtoken0, std.io.null_writer));
-}
-
-test "parse_success" {
-    var p: MakePatternType(8) = .{};
-
-    const check: [8]u8 = [8]u8{ 0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD, 0xFC };
-
-    const input_single = "0x00";
-    p.init(input_single, std.io.null_writer) catch {
-        try std.testing.expect(false);
-    };
-
-    const fmt_inputs = [_][]const u8{
-        "0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD, 0xFC",
-        "0x00,0x01,0x02,0x03,0xFF,0xFE,0xFD,0xFC",
-        "0x00 0x01 0x02 0x03 0xFF 0xFE 0xFD 0xFC",
-        "00, 01, 02, 03, FF, FE, FD, FC",
-        "00 01 02 03 FF FE FD FC",
-        "00%01%02%03%ff%fe%fd%fc",
-        "00,01,02,03,ff,fe,fd,fc",
-        "00;01;02;03;ff;fe;fd;fc",
-        "00:01:02:03:ff:fe:fd:fc",
-        "00\n01\n02\n03\nff\nfe\nfd\nfc",
-        "00\r\n01\r\n02\r\n03\r\nff\r\nfe\r\nfd\r\nfc",
-        "\\x00\\x01\\x02\\x03\\xff\\xfe\\xfd\\xfc", // _escaped_ \x
-        "00010203fffefdfc",
-        "0x00010203fffefdfc",
-
-        //"\x00\x01\x02\x03\xff\xfe\xfd\xfc", //not supported as a string parse, use raw bytes
-    };
-
-    for (fmt_inputs) |input| {
-        errdefer std.log.err("Failed on string: {s}", .{input});
-        p.init(input, std.io.null_writer) catch {
-            try std.testing.expect(false);
-        };
-        try std.testing.expect(checkArrAgainstPatternResult(check[0..8], p.bytes[0..p.size]));
-    }
-
-    const mix_input = "0x00 01, 02; 03: 0xFF%FE\r\nfd\\xfc";
-    {
-        errdefer {
-            std.log.err("\nFailed on string: {s}\n", .{mix_input});
-            _ = p.print(std.io.getStdErr().writer()) catch {};
+                const src: @Vector(pattern_size, u8) = haystack[i..][0..pattern_size].*;
+                if (@reduce(.And, ((src ^ find) | mask_v) == mask_v)) {
+                    return i;
+                }
+            }
+            return SearchResult.NotFound;
         }
-        p.init(mix_input, std.io.null_writer) catch {
-            try std.testing.expect(false);
-        };
-        try std.testing.expect(checkArrAgainstPatternResult(check[0..8], p.bytes[0..p.size]));
-    }
+
+        pub fn search_no_wildcards(self: *const @This(), haystack: []u8, scan_len: usize, needle: MakePatternType(pattern_size)) SearchResult!?usize {
+            if (self.pattern_size != needle.size) {
+                return SearchResult.BadOperation;
+            }
+            if (scan_len - pattern_size > haystack.len) {
+                return SearchResult.BadOperation;
+            }
+
+            const find: @Vector(pattern_size, u8) = needle.bytes[0..pattern_size].*;
+
+            for (0..scan_len - pattern_size) |i| {
+
+                // Don't bother with SIMD unless we find an initial byte
+                // However now we will double-check each instance of the starting byte.
+                // Slower on data where the pattern initial byte is very prevelent (~15+-% of all bytes).
+                if (haystack[i] != needle.bytes[0]) {
+                    continue;
+                }
+
+                const src: @Vector(pattern_size, u8) = haystack[i..][0..pattern_size].*;
+                if (@reduce(.And, src == find)) {
+                    return i;
+                }
+            }
+            return SearchResult.NotFound;
+        }
+    };
+}
+
+pub fn MakeFileScan(pattern_size: usize, chunk_size: usize) type {
+    return struct {
+        pub fn find_pattern(allocator: std.mem.Allocator, file: std.fs.File, needle: MakePatternType(pattern_size)) !usize {
+            const sr: MakeSearchRunner(pattern_size) = .{};
+
+            const buf = try allocator.alloc(u8, chunk_size);
+            defer allocator.free(buf);
+
+            const fstat = try file.stat();
+            if (fstat.size <= pattern_size) {
+                unreachable;
+            }
+            //std.debug.print("[SZ: {d}]\n", .{fstat.size});
+
+            var i: u64 = 0;
+            var file_index: usize = 0;
+            scan: while (file_index < fstat.size) {
+                const end_idx: usize = if (file_index + chunk_size >= fstat.size) fstat.size - 1 else file_index + chunk_size; // must promize sz > 0
+
+                // std.debug.print("[{d}] [range: {d}..{d}]\n", .{ i, file_index, end_idx });
+
+                // Cant find a pattern in this region
+                if (end_idx - file_index < pattern_size) {
+                    break;
+                }
+
+                try file.seekTo(file_index);
+
+                _ = try file.read(buf);
+
+                // Perform operations on chunk
+                const found: ?usize = sr.search(buf, chunk_size, needle) catch |err| found: {
+                    if (err == SearchResult.BadOperation) {
+                        //   std.debug.print("[scan error: Bad Operation]\n", .{});
+                        break :scan;
+                    }
+                    //last iter
+                    if (end_idx == fstat.size - 1) {
+                        //    std.debug.print("[NOT FOUND]\n", .{});
+                        break :scan;
+                    }
+                    break :found null;
+                };
+
+                // overlap sections by pattern size so we cannto miss patterns at the end of a block [(N - (pattern_sz - 1))..N]
+                if (found == null) {
+                    file_index += chunk_size;
+                    file_index -= pattern_size;
+                    i += 1;
+                    continue;
+                }
+                //  std.debug.print("[FOUND AT: 0x{X}+0x{X} (0x{X})] ABS: 0x{X:0>8}\n", .{ file_index, found.?, file_index + found.?, file_index + found.? });
+                return file_index + found.?;
+            }
+            return FileSearchError.NotFound;
+        }
+    };
 }
